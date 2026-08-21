@@ -139,10 +139,20 @@ the Verovio WASM build.
 
 ## Deploying
 
-`.github/workflows/deploy.yml` publishes `dist/` to GitHub Pages on every push
-to `main` (enable Pages → "GitHub Actions" in the repository settings). The
-build uses relative asset paths, so the same `dist/` also works from any static
-host or a local folder.
+Live at **https://joshua-nts.github.io/Bach_Bag_Bax/**.
+
+`.github/workflows/deploy.yml` builds on every push to `main` and force-pushes
+`dist/` to the `gh-pages` branch, which GitHub serves as-is. It deliberately
+avoids the "GitHub Actions" Pages source: that one has to be switched on by
+hand in the repository settings and only accepts deployments from the default
+branch. Pushing a `gh-pages` branch to a public repository enables Pages by
+itself, so this needs no settings at all.
+
+Each deploy is a single fresh commit rather than another layer of history, so
+the 8 MB engraver bundle is not accumulated build after build.
+
+The build uses relative asset paths, so the same `dist/` also works from any
+static host or a local folder.
 
 ## Known limits
 
