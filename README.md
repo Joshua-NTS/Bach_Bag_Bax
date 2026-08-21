@@ -139,20 +139,47 @@ the Verovio WASM build.
 
 ## Deploying
 
-Live at **https://joshua-nts.github.io/Bach_Bag_Bax/**.
+### Cloudflare Pages
 
+In the Pages project's build settings:
+
+| Field | Value |
+| --- | --- |
+| Framework preset | None (or Vite) |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory | *(leave empty)* |
+
+`npm run dev` is only for working locally — it starts a server and never writes
+any files, so it cannot be the build command.
+
+`.nvmrc` pins Node 22, the version the build is tested against; Cloudflare
+reads it automatically. `public/_headers` is copied into `dist/` and tells
+Cloudflare to cache the fingerprinted files under `/assets` forever while
+always revalidating `index.html` — worth having, since the engraver bundle is
+about 8 MB.
+
+The site is plain static files with no client-side routing, so it needs no
+`_redirects` and no functions.
+
+### GitHub Pages
+
+Also set up, at **https://joshua-nts.github.io/Bach_Bag_Bax/**.
 `.github/workflows/deploy.yml` builds on every push to `main` and force-pushes
 `dist/` to the `gh-pages` branch, which GitHub serves as-is. It deliberately
 avoids the "GitHub Actions" Pages source: that one has to be switched on by
 hand in the repository settings and only accepts deployments from the default
-branch. Pushing a `gh-pages` branch to a public repository enables Pages by
-itself, so this needs no settings at all.
+branch, whereas pushing a `gh-pages` branch to a public repository enables
+Pages by itself. Each publish is a single fresh commit, so the 8 MB bundle is
+not accumulated build after build.
 
-Each deploy is a single fresh commit rather than another layer of history, so
-the 8 MB engraver bundle is not accumulated build after build.
+Delete `.github/workflows/deploy.yml` and the `gh-pages` branch if Cloudflare
+is the only host you want.
 
-The build uses relative asset paths, so the same `dist/` also works from any
-static host or a local folder.
+### Anywhere else
+
+The build uses relative asset paths, so the same `dist/` works from any static
+host, a sub-path, or a local folder opened directly.
 
 ## Known limits
 
