@@ -25,7 +25,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # enablement turns Pages on via the API using this workflow's
+      # pages: write permission, so the repository setting does not have to be
+      # flipped by hand first.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
