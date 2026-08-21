@@ -165,16 +165,16 @@ export type Pairing = 'ST_AB' | 'SA_TB' | 'SB_AT';
 
 export const PAIRINGS: Array<{ id: Pairing; label: string; hint: string; roles: [Role, Role, Role, Role] }> = [
   {
+    id: 'SA_TB',
+    label: 'S + A  /  T + B',
+    hint: 'The default: women above, men below, as in a closed score',
+    roles: ['S', 'A', 'T', 'B'],
+  },
+  {
     id: 'ST_AB',
     label: 'S + T  /  A + B',
     hint: 'Soprano over tenor, alto over bass',
     roles: ['S', 'T', 'A', 'B'],
-  },
-  {
-    id: 'SA_TB',
-    label: 'S + A  /  T + B',
-    hint: 'Classic closed score: women above, men below',
-    roles: ['S', 'A', 'T', 'B'],
   },
   {
     id: 'SB_AT',
@@ -183,6 +183,8 @@ export const PAIRINGS: Array<{ id: Pairing; label: string; hint: string; roles: 
     roles: ['S', 'B', 'A', 'T'],
   },
 ];
+
+export const DEFAULT_PAIRING: Pairing = 'SA_TB';
 
 /** Build the four notated slots from the detected roles, for a given pairing. */
 export function assignmentFor(

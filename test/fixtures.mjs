@@ -148,3 +148,149 @@ export const UNISON = `<?xml version="1.0" encoding="UTF-8"?>
     </measure>
   </part>
 </score-partwise>`;
+
+/* ------------------------------------------------------------------ */
+/* A tiny Standard MIDI File writer, so the importer can be tested     */
+/* against input whose every note is known.                            */
+/* ------------------------------------------------------------------ */
+
+function varlen(value) {
+  const bytes = [value & 0x7f];
+  let v = value >> 7;
+  while (v > 0) {
+    bytes.unshift((v & 0x7f) | 0x80);
+    v >>= 7;
+  }
+  return bytes;
+}
+
+const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+
+function chunk(id, data) {
+  const n = data.length;
+  return [...ascii(id), (n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255, ...data];
+}
+
+function serialise(events) {
+  const sorted = events.slice().sort((a, b) => a.tick - b.tick || a.order - b.order);
+  const out = [];
+  let last = 0;
+  for (const e of sorted) {
+    out.push(...varlen(e.tick - last), ...e.data);
+    last = e.tick;
+  }
+  return [...out, ...varlen(0), 0xff, 0x2f, 0x00];
+}
+
+/**
+ * tracks: [{ name, channel, notes: [{ midi, start, dur }] }]  — ticks.
+ */
+export function makeMidiFile({ ppq = 480, tempo = 100, timeSig = [4, 4], keySig, tracks }) {
+  const conductor = [
+    { tick: 0, order: 0, data: [0xff, 0x03, ...varlen(4), ...ascii('Song')] },
+    {
+      tick: 0,
+      order: 1,
+      data: (() => {
+        const us = Math.round(60_000_000 / tempo);
+        return [0xff, 0x51, 0x03, (us >> 16) & 255, (us >> 8) & 255, us & 255];
+      })(),
+    },
+    {
+      tick: 0,
+      order: 2,
+      data: [0xff, 0x58, 0x04, timeSig[0], Math.round(Math.log2(timeSig[1])), 24, 8],
+    },
+  ];
+  if (keySig !== undefined) {
+    conductor.push({ tick: 0, order: 3, data: [0xff, 0x59, 0x02, keySig & 0xff, 0] });
+  }
+
+  const chunks = [chunk('MTrk', serialise(conductor))];
+  for (const track of tracks) {
+    const channel = track.channel ?? 0;
+    const events = [];
+    if (track.name) {
+      const bytes = ascii(track.name);
+      events.push({ tick: 0, order: 0, data: [0xff, 0x03, ...varlen(bytes.length), ...bytes] });
+    }
+    for (const note of track.notes) {
+      events.push({ tick: note.start, order: 2, data: [0x90 | channel, note.midi, note.velocity ?? 80] });
+      events.push({ tick: note.start + note.dur, order: 1, data: [0x80 | channel, note.midi, 0x40] });
+    }
+    chunks.push(chunk('MTrk', serialise(events)));
+  }
+
+  const header = chunk('MThd', [
+    0x00, 0x01,
+    (chunks.length >> 8) & 255, chunks.length & 255,
+    (ppq >> 8) & 255, ppq & 255,
+  ]);
+  return Uint8Array.from([...header, ...chunks.flat()]);
+}
+
+/**
+ * The sample chorale again, this time as a four-track MIDI file. Importing it
+ * must land on the same notes as importing the MusicXML, which is what makes
+ * the two readers checkable against each other.
+ */
+export const MIDI_SATB = makeMidiFile({
+  ppq: 480,
+  tempo: 72,
+  timeSig: [4, 4],
+  tracks: [
+    { name: 'Soprano', channel: 0, notes: [{ midi: 72, start: 0, dur: 480 }, { midi: 72, start: 480, dur: 480 }, { midi: 74, start: 960, dur: 480 }, { midi: 76, start: 1440, dur: 480 }, { midi: 76, start: 1920, dur: 480 }, { midi: 74, start: 2400, dur: 480 }, { midi: 72, start: 2880, dur: 960 }, { midi: 77, start: 3840, dur: 480 }, { midi: 76, start: 4320, dur: 480 }, { midi: 74, start: 4800, dur: 480 }, { midi: 72, start: 5280, dur: 480 }, { midi: 71, start: 5760, dur: 480 }, { midi: 71, start: 6240, dur: 480 }, { midi: 72, start: 6720, dur: 960 }, { midi: 76, start: 7680, dur: 480 }, { midi: 76, start: 8160, dur: 480 }, { midi: 77, start: 8640, dur: 480 }, { midi: 79, start: 9120, dur: 480 }, { midi: 79, start: 9600, dur: 480 }, { midi: 77, start: 10080, dur: 480 }, { midi: 76, start: 10560, dur: 960 }, { midi: 77, start: 11520, dur: 480 }, { midi: 76, start: 12000, dur: 480 }, { midi: 74, start: 12480, dur: 480 }, { midi: 74, start: 12960, dur: 480 }, { midi: 72, start: 13440, dur: 1920 }] },
+    { name: 'Alto', channel: 1, notes: [{ midi: 67, start: 0, dur: 480 }, { midi: 67, start: 480, dur: 480 }, { midi: 71, start: 960, dur: 480 }, { midi: 67, start: 1440, dur: 480 }, { midi: 67, start: 1920, dur: 480 }, { midi: 71, start: 2400, dur: 480 }, { midi: 64, start: 2880, dur: 960 }, { midi: 69, start: 3840, dur: 480 }, { midi: 67, start: 4320, dur: 480 }, { midi: 71, start: 4800, dur: 480 }, { midi: 64, start: 5280, dur: 480 }, { midi: 67, start: 5760, dur: 480 }, { midi: 67, start: 6240, dur: 480 }, { midi: 64, start: 6720, dur: 960 }, { midi: 67, start: 7680, dur: 480 }, { midi: 67, start: 8160, dur: 480 }, { midi: 69, start: 8640, dur: 480 }, { midi: 64, start: 9120, dur: 480 }, { midi: 64, start: 9600, dur: 480 }, { midi: 71, start: 10080, dur: 480 }, { midi: 67, start: 10560, dur: 960 }, { midi: 69, start: 11520, dur: 480 }, { midi: 67, start: 12000, dur: 480 }, { midi: 71, start: 12480, dur: 480 }, { midi: 71, start: 12960, dur: 480 }, { midi: 64, start: 13440, dur: 1920 }] },
+    { name: 'Tenor', channel: 2, notes: [{ midi: 64, start: 0, dur: 480 }, { midi: 64, start: 480, dur: 480 }, { midi: 55, start: 960, dur: 480 }, { midi: 60, start: 1440, dur: 480 }, { midi: 60, start: 1920, dur: 480 }, { midi: 55, start: 2400, dur: 480 }, { midi: 55, start: 2880, dur: 960 }, { midi: 60, start: 3840, dur: 480 }, { midi: 60, start: 4320, dur: 480 }, { midi: 62, start: 4800, dur: 480 }, { midi: 55, start: 5280, dur: 480 }, { midi: 62, start: 5760, dur: 480 }, { midi: 62, start: 6240, dur: 480 }, { midi: 55, start: 6720, dur: 960 }, { midi: 60, start: 7680, dur: 480 }, { midi: 60, start: 8160, dur: 480 }, { midi: 60, start: 8640, dur: 480 }, { midi: 60, start: 9120, dur: 480 }, { midi: 60, start: 9600, dur: 480 }, { midi: 62, start: 10080, dur: 480 }, { midi: 60, start: 10560, dur: 960 }, { midi: 60, start: 11520, dur: 480 }, { midi: 60, start: 12000, dur: 480 }, { midi: 55, start: 12480, dur: 480 }, { midi: 55, start: 12960, dur: 480 }, { midi: 55, start: 13440, dur: 1920 }] },
+    { name: 'Bass', channel: 3, notes: [{ midi: 48, start: 0, dur: 480 }, { midi: 48, start: 480, dur: 480 }, { midi: 43, start: 960, dur: 480 }, { midi: 48, start: 1440, dur: 480 }, { midi: 48, start: 1920, dur: 480 }, { midi: 43, start: 2400, dur: 480 }, { midi: 48, start: 2880, dur: 960 }, { midi: 53, start: 3840, dur: 480 }, { midi: 48, start: 4320, dur: 480 }, { midi: 55, start: 4800, dur: 480 }, { midi: 48, start: 5280, dur: 480 }, { midi: 55, start: 5760, dur: 480 }, { midi: 55, start: 6240, dur: 480 }, { midi: 48, start: 6720, dur: 960 }, { midi: 48, start: 7680, dur: 480 }, { midi: 48, start: 8160, dur: 480 }, { midi: 53, start: 8640, dur: 480 }, { midi: 48, start: 9120, dur: 480 }, { midi: 48, start: 9600, dur: 480 }, { midi: 55, start: 10080, dur: 480 }, { midi: 48, start: 10560, dur: 960 }, { midi: 53, start: 11520, dur: 480 }, { midi: 48, start: 12000, dur: 480 }, { midi: 55, start: 12480, dur: 480 }, { midi: 55, start: 12960, dur: 480 }, { midi: 48, start: 13440, dur: 1920 }] },
+  ],
+});
+
+/** Two bars where the middle note runs straight through the barline. */
+export const MIDI_TIE = makeMidiFile({
+  ppq: 480,
+  tempo: 96,
+  tracks: [
+    { name: 'Upper', channel: 0, notes: [
+      { midi: 72, start: 0, dur: 960 }, { midi: 74, start: 960, dur: 960 }, { midi: 76, start: 1920, dur: 1920 },
+    ] },
+    { name: 'Lower', channel: 1, notes: [
+      { midi: 64, start: 0, dur: 960 }, { midi: 64, start: 960, dur: 1920 },
+    ] },
+  ],
+});
+
+/** One track holding the whole chord, plus a drum channel that must be skipped. */
+export const MIDI_CHORDAL = makeMidiFile({
+  ppq: 480,
+  tempo: 100,
+  tracks: [
+    { name: 'Piano', channel: 0, notes: [
+      ...[72, 67, 64, 48].map((midi) => ({ midi, start: 0, dur: 1920 })),
+      ...[76, 67, 60, 48].map((midi) => ({ midi, start: 1920, dur: 1920 })),
+    ] },
+    { name: 'Drums', channel: 9, notes: [{ midi: 36, start: 0, dur: 240 }] },
+  ],
+});
+
+/** G major, so F sharp has to be spelled as F# and not G flat. */
+export const MIDI_GMAJOR = makeMidiFile({
+  ppq: 480,
+  tracks: [
+    { name: 'Tune', channel: 0, notes: [
+      { midi: 67, start: 0, dur: 480 }, { midi: 69, start: 480, dur: 480 },
+      { midi: 71, start: 960, dur: 480 }, { midi: 66, start: 1440, dur: 480 },
+    ] },
+  ],
+});
+
+/** Deliberately sloppy timing, to exercise quantisation. */
+export const MIDI_SLOPPY = makeMidiFile({
+  ppq: 480,
+  tracks: [
+    { name: 'Loose', channel: 0, notes: [
+      { midi: 60, start: 7, dur: 470 }, { midi: 62, start: 486, dur: 462 },
+      { midi: 64, start: 953, dur: 495 }, { midi: 65, start: 1437, dur: 470 },
+    ] },
+  ],
+});

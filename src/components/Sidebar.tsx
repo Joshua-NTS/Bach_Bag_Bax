@@ -3,6 +3,7 @@ import { type Pairing, PAIRINGS } from '../core/detect';
 import { CROWDED_SPAN, type LyricsMode, type MergeResult, type OctaveShift } from '../core/merge';
 import { type LayoutSettings, PAPERS, MUSIC_FONTS, DEFAULT_LAYOUT } from '../core/paper';
 import { type MidiOptions, GM_PROGRAMS } from '../core/midi';
+import { QUANTIZE_CHOICES, type MidiImportOptions } from '../core/midifile';
 import { CLEFS } from '../core/clef';
 import { Panel, Field, Slider, Segmented, Toggle, Select, NumberInput, Notice, Icon } from './ui';
 
@@ -47,6 +48,9 @@ interface Props {
   scoreHasRepeats: boolean;
   showGuides: boolean;
   warnings: string[];
+  /** Present only when the loaded file was a MIDI file. */
+  midiImport: MidiImportOptions | null;
+  onMidiImport: (patch: Partial<MidiImportOptions>) => void;
   onSettings: (patch: Partial<ScoreSettings>) => void;
   onLayout: (patch: Partial<LayoutSettings>) => void;
   onMidi: (patch: Partial<MidiOptions>) => void;
@@ -71,6 +75,8 @@ export function Sidebar(props: Props) {
     scoreHasRepeats,
     showGuides,
     warnings,
+    midiImport,
+    onMidiImport,
     onSettings,
     onLayout,
     onMidi,
@@ -152,6 +158,31 @@ export function Sidebar(props: Props) {
             ))}
           </Notice>
         </div>
+      )}
+
+      {midiImport && (
+        <Panel title="MIDI import" badge="from .mid">
+          <div className="field-hint">
+            A MIDI file records key presses, not notation, so where the notes land has to be
+            guessed. These two settings are the guesses.
+          </div>
+          <Segmented
+            label="Snap notes to"
+            value={String(midiImport.quantize)}
+            options={QUANTIZE_CHOICES.map((q) => ({ value: String(q.value), label: q.label }))}
+            hint={
+              midiImport.quantize === 0
+                ? 'Timing is kept exactly as recorded, which a live performance rarely survives.'
+                : `Starts and lengths are rounded to the nearest 1/${midiImport.quantize} note.`
+            }
+            onChange={(value) => onMidiImport({ quantize: Number(value) })}
+          />
+          <Toggle
+            label="Include the drum channel"
+            checked={midiImport.includePercussion}
+            onChange={(includePercussion) => onMidiImport({ includePercussion })}
+          />
+        </Panel>
       )}
 
       <Panel title="Voices" badge={`${score.streams.length} found`}>

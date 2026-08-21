@@ -5,7 +5,7 @@
  *   node test/ui.test.mjs
  */
 import { chromium } from 'playwright';
-import { CLOSED_SCORE } from './fixtures.mjs';
+import { CLOSED_SCORE, MIDI_SATB } from './fixtures.mjs';
 
 const BASE = process.env.BASE || 'http://localhost:5173';
 const CHROME = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -30,6 +30,19 @@ await page.goto(BASE, { waitUntil: 'domcontentloaded' });
 await page.getByRole('button', { name: 'Load a sample' }).click();
 await page.waitForSelector('.page svg', { timeout: 120000 });
 await page.waitForTimeout(800);
+
+/* ---- the default pairing ------------------------------------------ */
+
+const defaults = await page.evaluate(() => ({
+  pairing: document.querySelector('.segmented button[aria-pressed="true"]')?.textContent,
+  clefs: Array.from(document.querySelectorAll('.panel-badge')).map((b) => b.textContent),
+  octaves: Array.from(document.querySelectorAll('.voice-slot')).map(
+    (r) => r.querySelectorAll('select')[1].selectedOptions[0].textContent,
+  ),
+}));
+eq('S+A / T+B is the default pairing', defaults.pairing, 'S+A/T+B');
+check('it needs no octave shifting', defaults.octaves.every((o) => o === 'as is'), defaults.octaves);
+check('and reads treble over bass', defaults.clefs.includes('Treble / Bass'), defaults.clefs);
 
 /* ---- paper sizes -------------------------------------------------- */
 
@@ -211,6 +224,51 @@ await page.evaluate(async (xml) => {
 await page.waitForTimeout(400);
 const reopened = await page.getByRole('button', { name: 'Close this file' }).isVisible();
 check('a file stays open', reopened === true);
+
+/* ---- a MIDI file goes through the same pipeline --------------------- */
+
+async function dropFile(bytes, name, type) {
+  await page.evaluate(
+    ({ bytes, name, type }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([Uint8Array.from(bytes)], name, { type }));
+      const input = document.querySelector('input[type="file"]');
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    { bytes, name, type },
+  );
+}
+
+await page.getByRole('button', { name: 'Close this file' }).click();
+await page.waitForSelector('.dropzone', { timeout: 15000 });
+await dropFile(Array.from(MIDI_SATB), 'chorale.mid', 'audio/midi');
+await page.waitForSelector('.page svg', { timeout: 60000 });
+await page.waitForTimeout(1200);
+
+const midi = await page.evaluate(() => ({
+  fileName: document.querySelector('.file-chip strong')?.textContent,
+  voices: Array.from(document.querySelectorAll('.voice-legend-row')).map((r) => r.textContent),
+  notes: document.querySelectorAll('.page svg g.note').length,
+  panels: Array.from(document.querySelectorAll('.panel-head h3')).map((h) => h.textContent),
+  staffLabels: Array.from(document.querySelectorAll('.mute-btn')).map((b) => b.textContent),
+}));
+eq('the MIDI file is loaded', midi.fileName, 'chorale.mid');
+check('four voices come out of it', midi.voices.length === 4, midi.voices);
+eq('roles are read from the track names', midi.voices.map((v) => v[0]), ['S', 'A', 'T', 'B']);
+check('the same 104 notes are engraved', midi.notes === 104, midi.notes);
+check('the MIDI import panel appears', midi.panels.includes('MIDI import'), midi.panels);
+eq('paired S+A / T+B', midi.staffLabels.slice(0, 2), ['Soprano + Alto', 'Tenor + Bass']);
+
+// Changing how the MIDI is read re-reads it without losing the layout.
+await page.getByRole('button', { name: '1/4', exact: true }).click();
+await page.waitForTimeout(1500);
+const requantised = await page.evaluate(() => ({
+  notes: document.querySelectorAll('.page svg g.note').length,
+  paper: document.querySelector('.preview-bar')?.textContent.includes('210'),
+}));
+check('quantising again still engraves', requantised.notes > 0, requantised);
+check('and keeps the page settings', requantised.paper === true, requantised);
 
 check('no console or page errors', errors.length === 0, errors);
 

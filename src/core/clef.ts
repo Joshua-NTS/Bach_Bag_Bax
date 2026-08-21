@@ -11,20 +11,25 @@ export interface ClefDef {
   /** Diatonic index of the pitch that sits on the middle staff line. */
   middle: number;
   /**
-   * How readily a reader takes to it. C clefs and octave clefs are perfectly
-   * valid, but a choir reads treble and bass, so the unfamiliar ones only win
-   * when they are clearly the better fit.
+   * How readily a reader takes to it. Octave clefs are perfectly valid but
+   * unfamiliar, so they only win when clearly the better fit.
    */
   bias: number;
+  /**
+   * Whether the automatic choice may pick it. C clefs fit a narrow two-voice
+   * staff beautifully on paper, but a choir does not read them, so they are
+   * offered only when asked for by name.
+   */
+  auto: boolean;
 }
 
 export const CLEFS: ClefDef[] = [
-  { id: 'G2', label: 'Treble', sign: 'G', line: 2, octaveChange: 0, middle: 34, bias: 1 }, // B4
-  { id: 'F4', label: 'Bass', sign: 'F', line: 4, octaveChange: 0, middle: 22, bias: 1 }, // D3
-  { id: 'C3', label: 'Alto', sign: 'C', line: 3, octaveChange: 0, middle: 28, bias: 1.6 }, // C4
-  { id: 'C4', label: 'Tenor', sign: 'C', line: 4, octaveChange: 0, middle: 26, bias: 1.7 }, // A3
-  { id: 'G2-8', label: 'Treble 8vb', sign: 'G', line: 2, octaveChange: -1, middle: 27, bias: 1.35 }, // B3
-  { id: 'F4+8', label: 'Bass 8va', sign: 'F', line: 4, octaveChange: 1, middle: 29, bias: 1.75 }, // D4
+  { id: 'G2', label: 'Treble', sign: 'G', line: 2, octaveChange: 0, middle: 34, bias: 1, auto: true }, // B4
+  { id: 'F4', label: 'Bass', sign: 'F', line: 4, octaveChange: 0, middle: 22, bias: 1, auto: true }, // D3
+  { id: 'C3', label: 'Alto', sign: 'C', line: 3, octaveChange: 0, middle: 28, bias: 1.6, auto: false }, // C4
+  { id: 'C4', label: 'Tenor', sign: 'C', line: 4, octaveChange: 0, middle: 26, bias: 1.7, auto: false }, // A3
+  { id: 'G2-8', label: 'Treble 8vb', sign: 'G', line: 2, octaveChange: -1, middle: 27, bias: 1.35, auto: true }, // B3
+  { id: 'F4+8', label: 'Bass 8va', sign: 'F', line: 4, octaveChange: 1, middle: 29, bias: 1.75, auto: false }, // D4
 ];
 
 export function clefById(id: ClefId): ClefDef {
@@ -65,11 +70,13 @@ function cost(positions: number[], clef: ClefDef): number {
  * voices sharing one staff the range is wide, so this matters far more than it
  * would for a single line.
  */
+const AUTO_CLEFS = CLEFS.filter((c) => c.auto);
+
 export function chooseClef(positions: number[]): ClefId {
   if (positions.length === 0) return 'G2';
-  let best = CLEFS[0];
+  let best = AUTO_CLEFS[0];
   let bestScore = Infinity;
-  CLEFS.forEach((clef, index) => {
+  AUTO_CLEFS.forEach((clef, index) => {
     const score = cost(positions, clef) + index / 10_000;
     if (score < bestScore) {
       bestScore = score;
@@ -80,7 +87,7 @@ export function chooseClef(positions: number[]): ClefId {
 }
 
 export function bestClefCost(positions: number[]): number {
-  return Math.min(...CLEFS.map((clef) => cost(positions, clef)));
+  return Math.min(...AUTO_CLEFS.map((clef) => cost(positions, clef)));
 }
 
 /**

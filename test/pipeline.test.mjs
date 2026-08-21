@@ -6,7 +6,17 @@
  *   node test/pipeline.test.mjs
  */
 import { chromium } from 'playwright';
-import { CLOSED_SCORE, CHORDAL, FOUR_PARTS_NL, UNISON } from './fixtures.mjs';
+import {
+  CLOSED_SCORE,
+  CHORDAL,
+  FOUR_PARTS_NL,
+  UNISON,
+  MIDI_SATB,
+  MIDI_TIE,
+  MIDI_CHORDAL,
+  MIDI_GMAJOR,
+  MIDI_SLOPPY,
+} from './fixtures.mjs';
 
 const BASE = process.env.BASE || 'http://localhost:5173';
 const CHROME = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -151,6 +161,8 @@ async function run(fn, arg) {
       types: await import('/src/core/types.ts'),
       paper: await import('/src/core/paper.ts'),
       mxl: await import('/src/core/mxl.ts'),
+      midifile: await import('/src/core/midifile.ts'),
+      load: await import('/src/core/load.ts'),
       sample: await import('/src/sample.ts'),
       verovio: await import('/src/render/verovio.ts'),
     };
@@ -671,6 +683,176 @@ const mxl = await run(async (m) => {
 
 eq('mxl: unzipped and parsed', mxl.measures, 8);
 eq('mxl: base name', mxl.base, 'chorale');
+
+/* ================================================================== */
+/* 6b. Reading MIDI files                                             */
+/* ================================================================== */
+
+const midiIn = await run((m, f) => {
+  const opts = m.midifile.DEFAULT_MIDI_IMPORT;
+  const score = m.midifile.parseMidiScore(Uint8Array.from(f.satb), opts);
+  const roles = m.detect.detectRoles(score.streams);
+
+  // The same chorale read from MusicXML, to compare note for note.
+  const reference = m.musicxml.parseMusicXml(m.sample.SAMPLE_CHORALE);
+  const pitchesOf = (stream) =>
+    stream.measures.flat().flatMap((e) => e.pitches.map((p) => `${p.step}${p.alter || ''}${p.octave}`));
+  const lengthsOf = (stream, divisions) =>
+    stream.measures.flat().filter((e) => e.pitches.length).map((e) => e.duration / divisions);
+
+  const byName = (streams, name) => streams.find((s) => s.partName.startsWith(name));
+
+  return {
+    divisions: score.divisions,
+    measures: score.measures.length,
+    barLength: score.measures[0].length / score.divisions,
+    tempo: Math.round(score.measures[0].tempo),
+    time: score.measures[0].time,
+    names: score.streams.map((s) => s.partName),
+    roles: score.streams.map((s) => roles.get(s.key)),
+    fromMidi: ['Soprano', 'Alto', 'Tenor', 'Bass'].map((n) => pitchesOf(byName(score.streams, n))),
+    fromXml: ['Soprano', 'Alto', 'Tenor', 'Bass'].map((n) => pitchesOf(byName(reference.streams, n))),
+    midiLengths: ['Soprano', 'Alto', 'Tenor', 'Bass'].map((n) =>
+      lengthsOf(byName(score.streams, n), score.divisions),
+    ),
+    xmlLengths: ['Soprano', 'Alto', 'Tenor', 'Bass'].map((n) =>
+      lengthsOf(byName(reference.streams, n), reference.divisions),
+    ),
+  };
+}, { satb: Array.from(MIDI_SATB) });
+
+eq('midi in: internal divisions', midiIn.divisions, 768);
+eq('midi in: eight bars of 4/4', [midiIn.measures, midiIn.barLength], [8, 4]);
+eq('midi in: tempo read from the file', midiIn.tempo, 72);
+eq('midi in: time signature read', midiIn.time, { beats: 4, beatType: 4 });
+eq('midi in: one line per track, highest first', midiIn.names, ['Soprano', 'Alto', 'Tenor', 'Bass']);
+eq('midi in: roles from the track names', midiIn.roles, ['S', 'A', 'T', 'B']);
+// The strong one: the MIDI reader and the MusicXML reader agree note for note.
+eq('midi in: same pitches as the MusicXML of the same piece', midiIn.fromMidi, midiIn.fromXml);
+eq('midi in: same note lengths as the MusicXML', midiIn.midiLengths, midiIn.xmlLengths);
+
+const midiTie = await run((m, f) => {
+  const score = m.midifile.parseMidiScore(Uint8Array.from(f.tie), m.midifile.DEFAULT_MIDI_IMPORT);
+  const lower = score.streams.find((s) => s.partName === 'Lower');
+  return lower.measures.map((bar) =>
+    bar.map((ev) => ({
+      p: ev.pitches.length ? `${ev.pitches[0].step}${ev.pitches[0].octave}` : 'rest',
+      beats: ev.duration / score.divisions,
+      tie: `${ev.tieStop ? '<' : ''}${ev.tieStart ? '>' : ''}`,
+    })),
+  );
+}, { tie: Array.from(MIDI_TIE) });
+
+// A note running from halfway through bar 1 into bar 2 has to come out as two
+// tied halves, with a rest filling the rest of bar 2.
+eq('midi in: a note over the barline becomes tied halves', midiTie, [
+  [{ p: 'E4', beats: 2, tie: '' }, { p: 'E4', beats: 2, tie: '>' }],
+  [{ p: 'E4', beats: 2, tie: '<' }, { p: 'rest', beats: 2, tie: '' }],
+]);
+
+const midiChords = await run((m, f) => {
+  const score = m.midifile.parseMidiScore(Uint8Array.from(f.chordal), m.midifile.DEFAULT_MIDI_IMPORT);
+  const withDrums = m.midifile.parseMidiScore(Uint8Array.from(f.chordal), {
+    ...m.midifile.DEFAULT_MIDI_IMPORT,
+    includePercussion: true,
+  });
+  return {
+    lines: score.streams.length,
+    pitches: score.streams.map((s) =>
+      s.measures.flat().filter((e) => e.pitches.length).map((e) => m.types.midiOf(e.pitches[0])),
+    ),
+    warnings: score.warnings,
+    withDrumsLines: withDrums.streams.length,
+  };
+}, { chordal: Array.from(MIDI_CHORDAL) });
+
+eq('midi in: a chordal track splits into four lines', midiChords.lines, 4);
+eq('midi in: lines keep their pitch order', midiChords.pitches, [
+  [72, 76],
+  [67, 67],
+  [64, 60],
+  [48, 48],
+]);
+check(
+  'midi in: the drum channel is skipped and said so',
+  midiChords.warnings.some((w) => /percussion/i.test(w)),
+  midiChords.warnings,
+);
+check('midi in: drums can be opted back in', midiChords.withDrumsLines === 5, midiChords.withDrumsLines);
+
+const midiSpelling = await run((m, f) => {
+  const score = m.midifile.parseMidiScore(Uint8Array.from(f.g), m.midifile.DEFAULT_MIDI_IMPORT);
+  return {
+    fifths: score.measures[0].key.fifths,
+    spelled: score.streams[0].measures
+      .flat()
+      .filter((e) => e.pitches.length)
+      .map((e) => `${e.pitches[0].step}${e.pitches[0].alter > 0 ? '#' : e.pitches[0].alter < 0 ? 'b' : ''}`),
+    inferred: m.midifile.inferKey([{ midi: 66 }, { midi: 67 }, { midi: 71 }, { midi: 62 }, { midi: 69 }]),
+  };
+}, { g: Array.from(MIDI_GMAJOR) });
+
+eq('midi in: key inferred as G major', midiSpelling.fifths, 1);
+eq('midi in: sharps rather than flats', midiSpelling.spelled, ['G', 'A', 'B', 'F#']);
+eq('midi in: inferKey agrees', midiSpelling.inferred, 1);
+
+const midiQuantise = await run((m, f) => {
+  const at = (q) => {
+    const score = m.midifile.parseMidiScore(Uint8Array.from(f.sloppy), {
+      ...m.midifile.DEFAULT_MIDI_IMPORT,
+      quantize: q,
+    });
+    return score.streams[0].measures
+      .flat()
+      .filter((e) => e.pitches.length)
+      .map((e) => [e.onset / score.divisions, e.duration / score.divisions]);
+  };
+  return { snapped: at(16), raw: at(0) };
+}, { sloppy: Array.from(MIDI_SLOPPY) });
+
+// Recorded a few ticks either side of the beat; snapping puts it back on it.
+eq('midi in: quantising lands the notes on the beat', midiQuantise.snapped, [
+  [0, 1], [1, 1], [2, 1], [3, 1],
+]);
+check(
+  'midi in: quantising off keeps the recorded timing',
+  midiQuantise.raw.some(([onset]) => onset !== Math.round(onset)),
+  midiQuantise.raw,
+);
+
+/* ---- MIDI in, through the merge, back out as MIDI ----------------- */
+
+const midiRoundTrip = await run((m, f) => {
+  const source = { kind: 'midi', name: 'satb.mid', bytes: Uint8Array.from(f.satb) };
+  const score = m.load.parseSource(source, m.midifile.DEFAULT_MIDI_IMPORT);
+  const roles = m.detect.detectRoles(score.streams);
+  const assignment = m.detect.assignmentFor(score.streams, roles, 'SA_TB');
+  const merged = m.merge.buildMergedScore(score, {
+    assignment,
+    octaves: m.merge.NO_OCTAVE_SHIFT,
+    clef1: 'auto',
+    clef2: 'auto',
+    lyrics: 'none',
+    staffNames: ['S + A', 'T + B'],
+  });
+  const out = m.midi.renderMidi(score, merged.staves, ['S + A', 'T + B'], {
+    ...m.midi.DEFAULT_MIDI_OPTIONS,
+    expandRepeats: false,
+  });
+  return {
+    clefs: merged.clefs.map((c) => c.id),
+    staffPitches: [0, 1].map((staff) =>
+      [...new Set(out.notes.filter((n) => n.staff === staff).map((n) => n.midi))].sort((a, b) => a - b),
+    ),
+    seconds: Math.round(out.duration * 10) / 10,
+  };
+}, { satb: Array.from(MIDI_SATB) });
+
+eq('midi round trip: treble and bass', midiRoundTrip.clefs, ['G2', 'F4']);
+eq('midi round trip: soprano and alto land on staff 1', midiRoundTrip.staffPitches[0], [64, 67, 69, 71, 72, 74, 76, 77, 79]);
+eq('midi round trip: tenor and bass land on staff 2', midiRoundTrip.staffPitches[1], [43, 48, 53, 55, 60, 62, 64]);
+// Eight 4/4 bars at 72 bpm.
+eq('midi round trip: length', midiRoundTrip.seconds, Math.round((32 * 60 / 72) * 10) / 10);
 
 /* ================================================================== */
 /* 7. Page geometry and Verovio                                       */

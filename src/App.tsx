@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { readScoreFile, baseName } from './core/mxl';
-import { parseMusicXml } from './core/musicxml';
-import { splitChordalStreams, shouldOfferChordSplit, detectRoles, assignmentFor } from './core/detect';
+import { baseName } from './core/mxl';
+import { readSource, parseSource, type ScoreSource } from './core/load';
+import { DEFAULT_MIDI_IMPORT, type MidiImportOptions } from './core/midifile';
+import {
+  splitChordalStreams,
+  shouldOfferChordSplit,
+  detectRoles,
+  assignmentFor,
+  DEFAULT_PAIRING,
+} from './core/detect';
 import {
   buildMergedScore,
   autoFitOctaves,
@@ -25,7 +32,7 @@ import { SAMPLE_CHORALE } from './sample';
 const PX_PER_MM = 96 / 25.4;
 
 const DEFAULT_SETTINGS: ScoreSettings = {
-  pairing: 'ST_AB',
+  pairing: DEFAULT_PAIRING,
   assignment: { s1upper: null, s1lower: null, s2upper: null, s2lower: null },
   octaves: NO_OCTAVE_SHIFT,
   clef1: 'auto',
@@ -39,8 +46,10 @@ const DEFAULT_SETTINGS: ScoreSettings = {
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [source, setSource] = useState<ScoreSource | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [rawScore, setRawScore] = useState<ParsedScore | null>(null);
+  const [midiImport, setMidiImport] = useState<MidiImportOptions>(DEFAULT_MIDI_IMPORT);
   const [settings, setSettings] = useState<ScoreSettings>(DEFAULT_SETTINGS);
   const [layout, setLayout] = useState<LayoutSettings>(DEFAULT_LAYOUT);
   const [midiOptions, setMidiOptions] = useState<MidiOptions>(DEFAULT_MIDI_OPTIONS);
@@ -79,19 +88,22 @@ export default function App() {
   const roles = useMemo<Map<string, Role>>(() => (score ? detectRoles(score.streams) : new Map()), [score]);
 
   /* ---- loading ---------------------------------------------------- */
-  const ingest = useCallback((xml: string, name: string) => {
-    const parsed = parseMusicXml(xml);
+  const adopt = useCallback((next: ScoreSource, options: MidiImportOptions) => {
+    const parsed = parseSource(next, options);
     const effective =
       shouldOfferChordSplit(parsed) && DEFAULT_SETTINGS.splitChords ? splitChordalStreams(parsed) : parsed;
     const detected = detectRoles(effective.streams);
     const assignment = assignmentFor(effective.streams, detected, DEFAULT_SETTINGS.pairing);
-    // S+T and A+B each span about two octaves at written pitch, so unless the
-    // voices already fit a staff, start with them folded onto one.
+    // Some pairings span two octaves at written pitch; unless the voices
+    // already fit a staff, start with them folded onto one.
     const octaves = needsOctaveFitting(effective, assignment)
       ? autoFitOctaves(effective, assignment)
       : NO_OCTAVE_SHIFT;
+
+    setSource(next);
+    setMidiImport(options);
     setRawScore(parsed);
-    setFileName(name);
+    setFileName(next.name);
     setSettings({
       ...DEFAULT_SETTINGS,
       assignment,
@@ -109,9 +121,9 @@ export default function App() {
       setLoading(true);
       setLoadError(null);
       try {
-        const { xml, name } = await readScoreFile(file);
-        ingest(xml, name);
+        adopt(await readSource(file), DEFAULT_MIDI_IMPORT);
       } catch (error) {
+        setSource(null);
         setRawScore(null);
         setFileName(null);
         setLoadError(error instanceof Error ? error.message : String(error));
@@ -119,20 +131,36 @@ export default function App() {
         setLoading(false);
       }
     },
-    [ingest],
+    [adopt],
   );
 
   const openSample = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     try {
-      ingest(SAMPLE_CHORALE, 'sample-chorale.musicxml');
+      adopt({ kind: 'musicxml', name: 'sample-chorale.musicxml', xml: SAMPLE_CHORALE }, DEFAULT_MIDI_IMPORT);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  }, [ingest]);
+  }, [adopt]);
+
+  // Changing how the MIDI is read re-reads it, keeping every other choice.
+  const patchMidiImport = useCallback(
+    (patch: Partial<MidiImportOptions>) => {
+      if (!source || source.kind !== 'midi') return;
+      const next = { ...midiImport, ...patch };
+      setMidiImport(next);
+      try {
+        setRawScore(parseSource(source, next));
+        setLoadError(null);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [source, midiImport],
+  );
 
   const dragging = useWindowDrop(openFile);
 
@@ -394,6 +422,7 @@ export default function App() {
 
   const reset = useCallback(() => {
     stopPlayback();
+    setSource(null);
     setRawScore(null);
     setFileName(null);
     setPages([]);
@@ -441,7 +470,7 @@ export default function App() {
           </span>
           <div className="brand-text">
             <div className="brand-title">Bach Bag Bax</div>
-            <div className="brand-sub">SATB &rarr; two staves &amp; two-track MIDI</div>
+            <div className="brand-sub">Four voices &rarr; two staves &amp; a two-track MIDI file</div>
           </div>
         </div>
 
@@ -498,6 +527,8 @@ export default function App() {
             onMidi={patchMidi}
             onGuides={setShowGuides}
             onResetLayout={() => setLayout(DEFAULT_LAYOUT)}
+            midiImport={source?.kind === 'midi' ? midiImport : null}
+            onMidiImport={patchMidiImport}
             onFitOctaves={fitOctaves}
             onResetOctaves={resetOctaves}
             onDownloadMidi={downloadMidi}

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './ui';
 
-const ACCEPT = '.xml,.musicxml,.mxl,application/xml,text/xml';
+const ACCEPT = '.xml,.musicxml,.mxl,.mid,.midi,.kar,application/xml,text/xml,audio/midi';
 
 function pickScoreFile(list: FileList | null | undefined): File | null {
   if (!list || list.length === 0) return null;
   const files = Array.from(list);
-  return files.find((f) => /\.(musicxml|mxl|xml)$/i.test(f.name)) ?? files[0];
+  return files.find((f) => /\.(musicxml|mxl|xml|midi?|kar)$/i.test(f.name)) ?? files[0];
 }
 
 /** Full-window drag target, so a file can be dropped anywhere on the page. */
@@ -69,10 +69,10 @@ export function DropZone({
           <Icon.Music />
         </div>
         <div>
-          <h2>Drop a four-voice MusicXML file</h2>
+          <h2>Drop a four-voice score</h2>
           <p>
-            Soprano, alto, tenor and bass go in. A printable two-staff score and a two-track MIDI file
-            come out. Everything happens in your browser: nothing is uploaded.
+            MusicXML or MIDI. Soprano, alto, tenor and bass go in; a printable two-staff score and a
+            two-track MIDI file come out. Everything happens in your browser: nothing is uploaded.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -87,6 +87,7 @@ export function DropZone({
           <span className="tag">.musicxml</span>
           <span className="tag">.xml</span>
           <span className="tag">.mxl</span>
+          <span className="tag">.mid</span>
         </div>
       </div>
       <input

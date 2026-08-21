@@ -2,12 +2,12 @@ import { unzipSync, strFromU8 } from 'fflate';
 
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04]; // "PK\x03\x04"
 
-function looksLikeZip(bytes: Uint8Array): boolean {
+export function looksLikeZip(bytes: Uint8Array): boolean {
   return ZIP_MAGIC.every((b, i) => bytes[i] === b);
 }
 
 /** Strip a UTF-8/UTF-16 byte order mark, which DOMParser refuses to swallow. */
-function stripBom(text: string): string {
+export function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
@@ -15,7 +15,7 @@ function stripBom(text: string): string {
  * Pull the score out of a compressed MusicXML container (`.mxl`).
  * The container points at the real score through META-INF/container.xml.
  */
-function extractMxl(bytes: Uint8Array): string {
+export function extractMxl(bytes: Uint8Array): string {
   const files = unzipSync(bytes);
   const names = Object.keys(files);
 
@@ -50,5 +50,5 @@ export async function readScoreFile(file: File): Promise<LoadedFile> {
 }
 
 export function baseName(fileName: string): string {
-  return fileName.replace(/\.(musicxml|xml|mxl)$/i, '') || 'score';
+  return fileName.replace(/\.(musicxml|xml|mxl|midi?|kar)$/i, '') || 'score';
 }
